@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import html2pdf from "html2pdf.js";
 
+
 // --- 🔒 SÉCURITÉ : VARIABLES D'ENVIRONNEMENT ---
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -95,6 +96,69 @@ function ChronoPromo({ dateFin }) {
 
 export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showMiniCart, setShowMiniCart] = useState(false);
+  // --- 🚀 MOTEUR ONESIGNAL (NOTIFICATIONS PUSH) ---
+ 
+// --- 📱 LOGIQUE PWA (INSTALLATION & MISE À JOUR) ---
+const [deferredPrompt, setDeferredPrompt] = useState(null);
+const [isInstallable, setIsInstallable] = useState(false);
+const [isInstalled, setIsInstalled] = useState(false);
+const [isIOS, setIsIOS] = useState(false);
+const [showIOSPrompt, setShowIOSPrompt] = useState(false);
+
+useEffect(() => {
+  // 1. Détecter si on est sur un appareil Apple
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
+  setIsIOS(isIosDevice);
+
+  // 2. Vérifier si l'app est déjà installée
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isStandalone) {
+    setIsInstalled(true);
+  } else if (isIosDevice) {
+    // Si c'est un iPhone non installé, on rend le bouton cliquable
+    setIsInstallable(true);
+  }
+
+  // 3. Logique Android normale
+  const handleBeforeInstallPrompt = (e) => {
+    e.preventDefault();
+    setDeferredPrompt(e);
+    setIsInstallable(true);
+  };
+
+  const handleAppInstalled = () => {
+    setIsInstallable(false);
+    setIsInstalled(true);
+    setDeferredPrompt(null);
+    setShowIOSPrompt(false);
+  };
+
+  window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  window.addEventListener('appinstalled', handleAppInstalled);
+
+  return () => {
+    window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.removeEventListener('appinstalled', handleAppInstalled);
+  };
+}, []);
+
+const handleInstallClick = async () => {
+  if (isIOS) {
+    // Sur Apple, on ouvre notre joli tutoriel
+    setShowIOSPrompt(true);
+    return;
+  }
+  if (!deferredPrompt) return;
+  // Sur Android, on lance le vrai menu d'installation
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') setIsInstallable(false);
+  setDeferredPrompt(null);
+};
+// --------------------------------------------------
+  // --------------------------------------------------
 
   const [view, setView] = useState(() => {
     const hash = window.location.hash.replace("#/", "");
@@ -134,6 +198,17 @@ export default function App() {
   });
 
   const [rubriques, setRubriques] = useState([]);
+  // --- 📢 BANDEAU D'URGENCE DYNAMIQUE ---
+  const [messagesBanniere, setMessagesBanniere] = useState(["LIVRAISON TANA & PROVINCE"]);
+  const [indexBanniere, setIndexBanniere] = useState(0);
+
+  useEffect(() => {
+    if (messagesBanniere.length <= 1) return;
+    const timer = setInterval(() => {
+      setIndexBanniere((prev) => (prev + 1) % messagesBanniere.length);
+    }, 3000); // Change le texte toutes les 3 secondes
+    return () => clearInterval(timer);
+  }, [messagesBanniere]);
   const [articleActuel, setArticleActuel] = useState(() => {
     const saved = sessionStorage.getItem("hakimi_article");
     return saved ? JSON.parse(saved) : null;
@@ -155,14 +230,27 @@ export default function App() {
       );
   }, [produitSelectionne]);
 
-  useEffect(() => {
-    if (view.startsWith("produit/") && produits.length > 0) {
-      const prodId = view.split("produit/")[1];
-      const prod = produits.find((p) => p.id.toString() === prodId);
-      if (prod) setProduitSelectionne(prod);
-      else setView("catalogue");
-    }
-  }, [view, produits]);
+ // --- ÉTAT POUR LES 4 PRODUITS ALÉATOIRES ---
+ const [produitsAleatoires, setProduitsAleatoires] = useState([]);
+
+ useEffect(() => {
+   if (view.startsWith("produit/") && produits.length > 0) {
+     const prodId = view.split("produit/")[1];
+     const prod = produits.find((p) => p.id.toString() === prodId);
+     
+     if (prod) {
+       setProduitSelectionne(prod);
+       
+       // 🎲 On prend tous les autres produits, on les mélange, et on en garde 4
+       const autresProduits = produits.filter(p => p.id !== prod.id);
+       const melange = [...autresProduits].sort(() => 0.5 - Math.random());
+       setProduitsAleatoires(melange.slice(0, 4));
+       
+     } else {
+       setView("catalogue");
+     }
+   }
+ }, [view, produits]);
 
   const [menusWeb, setMenusWeb] = useState([]);
   const [menuActuel, setMenuActuel] = useState("");
@@ -171,15 +259,14 @@ export default function App() {
   useEffect(() => {
     if (view.startsWith("catalogue")) {
       const parts = view.split("/");
-      const catUrl = parts[1] ? decodeURIComponent(parts[1]).trim() : "";
-      const sousCatUrl = parts[2]
-        ? decodeURIComponent(parts[2]).trim()
-        : "TOUS LES PRODUITS";
-      setMenuActuel(catUrl);
-      setSousCatActuelle(sousCatUrl);
+      setMenuActuel(parts[1] ? decodeURIComponent(parts[1]).trim() : "");
+      setSousCatActuelle(parts[2] ? decodeURIComponent(parts[2]).trim() : "TOUS LES PRODUITS");
+    } else if (view.startsWith("informatique")) {
+      const parts = view.split("/");
+      setMenuActuel(parts[1] ? decodeURIComponent(parts[1]).trim() : "");
+      setSousCatActuelle(parts[2] ? decodeURIComponent(parts[2]).trim() : "TOUS LES PRODUITS");
     }
   }, [view]);
-
   useEffect(() => {
     if (window.fbq && typeof window.fbq === "function")
       window.fbq("track", "PageView");
@@ -201,7 +288,23 @@ export default function App() {
     [panier]
   );
 
+// --- NOUVEAU : Auto-sélection du mode DIGITAL ultra-sécurisée ---
+useEffect(() => {
+  const hasService = panier.some(p => p.categorie_web === "Services" || p.sous_categorie_web === "Services");
+  setFormClient((prev) => {
+    if (hasService && prev.type_livraison !== "DIGITAL") {
+      return { ...prev, type_livraison: "DIGITAL", quartier: "", canal_digital: prev.canal_digital || "WHATSAPP" };
+    }
+    if (!hasService && prev.type_livraison === "DIGITAL") {
+      return { ...prev, type_livraison: "TANA" };
+    }
+    return prev;
+  });
+}, [panier]);
+
   const [searchQuery, setSearchQuery] = useState("");
+  const [minCommandes, setMinCommandes] = useState({ tana: 0, province: 0 });
+  const [showQuartiersDropdown, setShowQuartiersDropdown] = useState(false);
   const [maxPrice, setMaxPrice] = useState("");
   const [sortOrder, setSortOrder] = useState("");
 
@@ -219,19 +322,27 @@ export default function App() {
   const [carouselDynamicImages, setCarouselDynamicImages] =
     useState(CAROUSEL_IMAGES);
 
-  const [formClient, setFormClient] = useState({
-    nom: "",
-    whatsapp: "",
-    whatsapp2: "",
-    type_livraison: "TANA",
-    ville: "",
-    quartier: "",
-    adresse_detail: "",
-    message_expedition: "",
-    methode_paiement: "",
-  });
+ // 🧠 RÉCUPÉRATION DE LA MÉMOIRE CLIENT
+ const [formClient, setFormClient] = useState(() => {
+  const memoire = localStorage.getItem("hakimi_client_info");
+  if (memoire) return JSON.parse(memoire);
+  return {
+    nom: "", whatsapp: "", whatsapp2: "", type_livraison: "TANA", ville: "", quartier: "", adresse_detail: "", message_expedition: "", methode_paiement: "",
+    email: "", canal_digital: "WHATSAPP" // 👈 NOUVEAU
+  };
+});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [commandeValidee, setCommandeValidee] = useState(null);
+// 🧠 MÉMOIRE DE LA COMMANDE (Empêche la disparition sur mobile)
+const [commandeValidee, setCommandeValidee] = useState(() => {
+  const saved = sessionStorage.getItem("hakimi_commande_validee");
+  return saved ? JSON.parse(saved) : null;
+});
+
+useEffect(() => {
+  if (commandeValidee) {
+    sessionStorage.setItem("hakimi_commande_validee", JSON.stringify(commandeValidee));
+  }
+}, [commandeValidee]);
   const [notificationPanier, setNotificationPanier] = useState(null);
   const [formSuivi, setFormSuivi] = useState({ whatsapp: "", numero: "" });
   const [commandeSuivi, setCommandeSuivi] = useState(null);
@@ -296,8 +407,17 @@ export default function App() {
             setMenusWeb(data.categories_hierarchie_json);
           if (data.maintenance_mode) setMaintenanceDate(data.maintenance_date);
           else setMaintenanceDate(null);
+          if (data.min_commande_tana !== undefined) {
+            setMinCommandes({
+              tana: data.min_commande_tana || 0,
+              province: data.min_commande_province || 0
+            });
+          }
           if (data.texte_livraison) setTexteLivraison(data.texte_livraison);
           if (data.texte_conditions) setTexteConditions(data.texte_conditions);
+          if (data.bandeau_promo_json && data.bandeau_promo_json.length > 0) {
+            setMessagesBanniere(data.bandeau_promo_json);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -315,50 +435,62 @@ export default function App() {
       prev === 0 ? carouselDynamicImages.length - 1 : prev - 1
     );
 
-  const addToCart = (prod) => {
-    // 1. SCÉNARIO 5 : Interdiction de mélanger les paniers
-    if (panier.length > 0) {
-      const isPanierSurCommande = panier[0].sur_commande === true;
-      const isNouveauSurCommande = prod.sur_commande === true;
-      if (isPanierSurCommande !== isNouveauSurCommande) {
-        return alert(
-          isNouveauSurCommande
-            ? "⚠️ Votre panier contient des articles en stock.\n\nPour des raisons logistiques, les pré-commandes doivent être validées séparément.\nVeuillez finaliser votre achat actuel ou vider votre panier."
-            : "⚠️ Votre panier contient des articles en pré-commande.\n\nPour des raisons logistiques, les articles en stock doivent être validés séparément.\nVeuillez finaliser votre achat actuel ou vider votre panier."
-        );
+    const addToCart = (prod) => {
+      // 🛡️ BOUCLIER ANTI-MÉLANGE (Physique vs Services Numériques)
+      const isNouveauService = prod.categorie_web === "Services" || prod.sous_categorie_web === "Services";
+      if (panier.length > 0) {
+        const hasServiceInCart = panier.some(p => p.categorie_web === "Services" || p.sous_categorie_web === "Services");
+        if (isNouveauService && !hasServiceInCart) {
+          return alert("⚠️ Opération impossible.\nVous ne pouvez pas mélanger des services numériques (licences) avec des produits physiques. Veuillez valider votre panier actuel d'abord.");
+        }
+        if (!isNouveauService && hasServiceInCart) {
+          return alert("⚠️ Opération impossible.\nVotre panier contient des services numériques. Vous ne pouvez pas y ajouter des produits physiques.");
+        }
       }
-    }
-
-    if (Number(prod.stock_actuel) <= 0 && !prod.sur_commande)
-      return alert("Rupture de stock.");
-
-    let produitA_Ajouter = { ...prod };
-    const now = new Date();
-    if (
-      prod.prix_promo &&
-      new Date(prod.promo_debut) <= now &&
-      new Date(prod.promo_fin) >= now
-    ) {
-      produitA_Ajouter.prix_vente = prod.prix_promo;
-    }
-
-    const exist = panier.find((item) => item.id === produitA_Ajouter.id);
-    if (exist) {
-      if (!prod.sur_commande && exist.qte >= produitA_Ajouter.stock_actuel)
-        return alert("Stock maximum atteint !");
-      setPanier(
-        panier.map((item) =>
-          item.id === produitA_Ajouter.id
-            ? { ...item, qte: item.qte + 1 }
-            : item
-        )
-      );
-    } else {
-      setPanier([...panier, { ...produitA_Ajouter, qte: 1 }]);
-    }
-    setNotificationPanier(produitA_Ajouter.nom);
-    setTimeout(() => setNotificationPanier(null), 3000);
-  };
+  
+      // 1. SCÉNARIO 5 : Interdiction de mélanger les paniers
+      if (panier.length > 0) {
+        const isPanierSurCommande = panier[0].sur_commande === true;
+        const isNouveauSurCommande = prod.sur_commande === true;
+        if (isPanierSurCommande !== isNouveauSurCommande) {
+          return alert(
+            isNouveauSurCommande
+              ? "⚠️ Votre panier contient des articles en stock.\n\nPour des raisons logistiques, les pré-commandes doivent être validées séparément.\nVeuillez finaliser votre achat actuel ou vider votre panier."
+              : "⚠️ Votre panier contient des articles en pré-commande.\n\nPour des raisons logistiques, les articles en stock doivent être validés séparément.\nVeuillez finaliser votre achat actuel ou vider votre panier."
+          );
+        }
+      }
+  
+      if (Number(prod.stock_actuel) <= 0 && !prod.sur_commande)
+        return alert("Rupture de stock.");
+  
+      let produitA_Ajouter = { ...prod };
+      const now = new Date();
+      if (
+        prod.prix_promo &&
+        new Date(prod.promo_debut) <= now &&
+        new Date(prod.promo_fin) >= now
+      ) {
+        produitA_Ajouter.prix_vente = prod.prix_promo;
+      }
+  
+      const exist = panier.find((item) => item.id === produitA_Ajouter.id);
+      if (exist) {
+        if (!prod.sur_commande && exist.qte >= produitA_Ajouter.stock_actuel)
+          return alert("Stock maximum atteint !");
+        setPanier(
+          panier.map((item) =>
+            item.id === produitA_Ajouter.id
+              ? { ...item, qte: item.qte + 1 }
+              : item
+          )
+        );
+      } else {
+        setPanier([...panier, { ...produitA_Ajouter, qte: 1 }]);
+      }
+      setNotificationPanier(produitA_Ajouter.nom);
+      setTimeout(() => setNotificationPanier(null), 3000);
+    };
 
   const removeFromCart = (id) =>
     setPanier(panier.filter((item) => item.id !== id));
@@ -441,8 +573,29 @@ export default function App() {
       return alert("Veuillez indiquer la ville.");
     if (!formClient.methode_paiement)
       return alert("Veuillez sélectionner un moyen de paiement.");
+    // --- VÉRIFICATION DU NUMÉRO PRINCIPAL ---
     const numeroEpuré = formClient.whatsapp.replace(/[^0-9]/g, "");
-    if (numeroEpuré.length !== 10) return alert("⚠️ Numéro WhatsApp invalide.");
+    const prefixesValides = ["032", "033", "034", "037", "038"];
+    const prefixe = numeroEpuré.substring(0, 3);
+
+    if (numeroEpuré.length !== 10 || !prefixesValides.includes(prefixe)) {
+      return alert("⚠️ Numéro WhatsApp principal invalide.\nIl doit contenir 10 chiffres et commencer par 032, 033, 034, 037 ou 038.");
+    }
+// --- SÉCURITÉ : VÉRIFICATION DU MINIMUM DE COMMANDE ---
+if (formClient.type_livraison === "TANA" && minCommandes.tana > 0 && totalPanier < minCommandes.tana) {
+  return alert(`⚠️ Désolé ! La livraison est possible à partir de ${formatAr(minCommandes.tana)} Ar d'achat à Tana.`);
+}
+if (formClient.type_livraison === "PROVINCE" && minCommandes.province > 0 && totalPanier < minCommandes.province) {
+  return alert(`⚠️ Désolé ! L'expédition en province est possible à partir de ${formatAr(minCommandes.province)} Ar d'achat.`);
+}
+    // --- VÉRIFICATION DU NUMÉRO DE SECOURS (S'IL EST REMPLI) ---
+    if (formClient.whatsapp2) {
+      const num2Epuré = formClient.whatsapp2.replace(/[^0-9]/g, "");
+      const pref2 = num2Epuré.substring(0, 3);
+      if (num2Epuré.length !== 10 || !prefixesValides.includes(pref2)) {
+        return alert("⚠️ Le numéro de secours est invalide.\nIl doit contenir 10 chiffres et commencer par 032, 033, 034, 037 ou 038.");
+      }
+    }
 
     setIsSubmitting(true);
     const numeroUnique =
@@ -456,11 +609,13 @@ export default function App() {
         formClient.type_livraison === "PROVINCE"
           ? "PROVINCE"
           : formClient.quartier,
-      adresse_detail:
-        formClient.type_livraison === "PROVINCE"
-          ? `Ville : ${formClient.ville} | Transporteur : ${formClient.message_expedition} | Adresse : ${formClient.adresse_detail}`
-          : formClient.adresse_detail,
-      articles_json: {
+          adresse_detail:
+          formClient.type_livraison === "PROVINCE"
+            ? `Ville : ${formClient.ville} | Transporteur : ${formClient.message_expedition} | Adresse : ${formClient.adresse_detail}`
+            : formClient.type_livraison === "DIGITAL"
+            ? `LIVRAISON NUMÉRIQUE via ${formClient.canal_digital} ${formClient.canal_digital === 'EMAIL' ? '('+formClient.email+')' : ''}`
+            : formClient.adresse_detail,
+        articles_json: {
         articles: panier,
         methode_paiement: formClient.methode_paiement,
         type_livraison: formClient.type_livraison,
@@ -498,37 +653,56 @@ export default function App() {
       articles: panier,
       fraisLivraison: fraisLivraison,
     });
+    // 💾 SAUVEGARDE DANS LE TÉLÉPHONE DU CLIENT
+    localStorage.setItem("hakimi_client_info", JSON.stringify({
+      nom: formClient.nom,
+      whatsapp: formClient.whatsapp,
+      whatsapp2: formClient.whatsapp2,
+      type_livraison: formClient.type_livraison,
+      ville: formClient.ville,
+      quartier: formClient.quartier,
+      adresse_detail: formClient.adresse_detail,
+      methode_paiement: formClient.methode_paiement,
+    }));
+
     setPanier([]);
-    setFormClient({
-      nom: "",
-      whatsapp: "",
-      whatsapp2: "",
-      type_livraison: "TANA",
-      ville: "",
-      message_expedition: "",
-      quartier: "",
-      adresse_detail: "",
-      methode_paiement: "",
-    });
+    // On vide juste le message d'expédition, on garde tout le reste intact !
+    setFormClient({ ...formClient, message_expedition: "" });
     setView("succes");
     setIsSubmitting(false);
   };
 
   let produitsFiltres = produits.filter((p) => {
-    const matchMenu = menuActuel === "" || p.categorie_web === menuActuel;
-    const matchSousCat =
-      sousCatActuelle === "TOUS LES PRODUITS" ||
-      p.sous_categorie_web === sousCatActuelle;
     const sq = searchQuery.toLowerCase().trim();
+    const isSearching = sq !== "";
+
     const matchSearch =
       sq === "" ||
       (p.nom || "").toLowerCase().includes(sq) ||
       (p.description || "").toLowerCase().includes(sq) ||
       (p.categorie_web || "").toLowerCase().includes(sq) ||
       (p.sous_categorie_web || "").toLowerCase().includes(sq);
-    const matchPrice =
-      maxPrice === "" || Number(p.prix_vente) <= Number(maxPrice);
-    return matchMenu && matchSousCat && matchSearch && matchPrice;
+
+    const matchPrice = maxPrice === "" || Number(p.prix_vente) <= Number(maxPrice);
+
+    // 🔓 MAGIE : Si le client fait une recherche, on brise le bouclier et on affiche tout ce qui correspond !
+    if (isSearching) {
+      return matchSearch && matchPrice;
+    }
+
+    // 🛡️ NAVIGATION NORMALE : On garde les univers séparés
+    const catWeb = (p.categorie_web || "").toUpperCase();
+    const isTechProduct = catWeb === "INFORMATIQUE" || catWeb === "SERVICES";
+    
+    if (view.startsWith("informatique") && !isTechProduct) return false;
+    if (view.startsWith("catalogue") && isTechProduct) return false;
+
+    const matchMenu = menuActuel === "" || p.categorie_web === menuActuel;
+    const matchSousCat =
+      sousCatActuelle === "TOUS LES PRODUITS" ||
+      p.sous_categorie_web === sousCatActuelle;
+      
+    return matchMenu && matchSousCat && matchPrice;
   });
 
   if (sortOrder === "asc")
@@ -546,143 +720,322 @@ export default function App() {
   });
 
   // ======================================================================
-  // 🟢 LE REÇU PDF SÉCURISÉ (SCÉNARIO 5)
+  // 🟢 LE REÇU PDF SÉCURISÉ (DESIGN ULTRA-PREMIUM STRIPE/APPLE)
   // ======================================================================
   const telechargerRecuPDF = () => {
     if (!commandeValidee) return;
 
-    const articlesHTML = commandeValidee.articles
-      .map(
-        (item) => `
-      <tr>
-        <td style="padding: 10px 0; border-bottom: 1px solid #eee; font-size: 12px;">
-          <strong style="color: #333;">${item.qte}x ${item.nom}</strong>
-          ${
-            item.sur_commande
-              ? `<br/><span style="display: inline-block; margin-top: 4px; background-color: #ffedd5; color: #c2410c; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 900; text-transform: uppercase;">📦 Pre-commande</span>`
-              : ""
-          }
+    const articlesHTML = commandeValidee.articles.map((item, index) => `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 16px 0; font-size: 12px; color: #334155; font-weight: 600;">
+          <span style="display:inline-block; width: 24px; color:#94a3b8; font-weight:800;">${item.qte}x</span> 
+          ${item.nom}
+          ${item.sur_commande ? `<br/><span style="display:inline-block; margin-top:6px; font-size:8px; background:#fff7ed; color:#ea580c; padding:4px 8px; border-radius:4px; text-transform:uppercase; font-weight:900; letter-spacing:0.5px;">📦 Pré-commande</span>` : ''}
         </td>
-        <td style="padding: 10px 0; border-bottom: 1px solid #eee; text-align: right; font-size: 12px; font-weight: bold;">
+        <td style="padding: 16px 0; font-size: 13px; color: #0f172a; font-weight: 800; text-align: right;">
           ${formatAr(item.prix_vente * item.qte)} Ar
         </td>
       </tr>
-    `
-      )
-      .join("");
+    `).join("");
 
-    const isCmdSurCommande =
-      commandeValidee.articles.length > 0 &&
-      commandeValidee.articles[0].sur_commande === true;
-    const totalArticles = commandeValidee.articles.reduce(
-      (acc, i) => acc + Number(i.prix_vente) * i.qte,
-      0
-    );
+    const isCmdSurCommande = commandeValidee.articles.length > 0 && commandeValidee.articles[0].sur_commande === true;
+    const totalArticles = commandeValidee.articles.reduce((acc, i) => acc + Number(i.prix_vente) * i.qte, 0);
     const fraisLiv = Number(commandeValidee.fraisLivraison || 0);
     const acompte = isCmdSurCommande ? Math.round(totalArticles * 0.6) : 0;
     const reste = isCmdSurCommande ? totalArticles - acompte + fraisLiv : 0;
 
     const element = document.createElement("div");
     element.innerHTML = `
-      <div style="padding: 40px; font-family: Arial, sans-serif; color: #333; max-width: 800px; margin: auto;">
-        <div style="text-align: center; border-bottom: 2px solid #800020; padding-bottom: 15px; margin-bottom: 25px;">
-          <h1 style="color:#800020; margin:0; font-size:28px; font-style:italic; font-weight:900;">HAKIMI PLUS</h1>
-          <p style="margin:5px 0 0 0; color:#666; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Note de Commande</p>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; margin-bottom: 30px;">
-          <div>
-            <p style="margin: 0; font-size: 10px; color: #888; font-weight: bold; text-transform: uppercase;">Client</p>
-            <p style="margin: 5px 0; font-size: 14px; font-weight: bold;">${
-              commandeValidee.nom
-            }</p>
-            <p style="margin: 0; font-size: 12px; color: #555;">Paiement: ${
-              commandeValidee.methode
-            }</p>
-          </div>
+      <div style="padding: 60px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #ffffff; width: 800px; box-sizing: border-box;">
+        
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f8fafc; padding-bottom: 30px; margin-bottom: 40px;">
+      <div>
+        <img src="${LOGO_URL}" crossorigin="anonymous" style="height: 45px; object-fit: contain; margin-bottom: 8px;" />
+        <p style="margin: 0; font-size: 11px; color: #64748b; font-weight: 500;">Votre magasin en ligne<br/>Anosizato, Antananarivo<br/>034 86 972 98</p>
+      </div>
           <div style="text-align: right;">
-            <p style="margin: 0; font-size: 10px; color: #888; font-weight: bold; text-transform: uppercase;">Date</p>
-            <p style="margin: 5px 0; font-size: 13px;">${new Date().toLocaleString(
-              "fr-FR"
-            )}</p>
+            <h1 style="margin: 0 0 8px 0; font-size: 28px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px;">REÇU DE COMMANDE</h1>
+            <div style="display: inline-block; background: #f8fafc; padding: 8px 16px; border-radius: 8px; border: 1px solid #f1f5f9;">
+              <span style="font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 2px;">N° de Suivi</span>
+              <span style="font-size: 16px; font-weight: 900; color: #0f172a; letter-spacing: 1px;">${commandeValidee.numero}</span>
+            </div>
           </div>
         </div>
 
-        <div style="background: #800020; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 30px;">
-          <p style="margin: 0; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Numero de Suivi Unique</p>
-          <h2 style="margin: 5px 0 0 0; font-size: 32px; font-weight: 900;">${
-            commandeValidee.numero
-          }</h2>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 40px; gap: 30px;">
+          <div style="flex: 1; background: #f8fafc; padding: 24px; border-radius: 16px;">
+            <p style="margin: 0 0 8px 0; font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Facturé à</p>
+            <p style="margin: 0 0 4px 0; font-size: 16px; font-weight: 900; color: #0f172a;">${commandeValidee.nom}</p>
+            <p style="margin: 0; font-size: 12px; color: #475569; font-weight: 500;">Paiement : <strong style="color: #0f172a;">${commandeValidee.methode}</strong></p>
+          </div>
+          <div style="flex: 1; background: #f8fafc; padding: 24px; border-radius: 16px;">
+            <p style="margin: 0 0 8px 0; font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Détails de la date</p>
+            <p style="margin: 0 0 4px 0; font-size: 14px; font-weight: 800; color: #0f172a;">${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+            <p style="margin: 0; font-size: 12px; color: #475569; font-weight: 500;">Heure : ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
         </div>
 
-        <div style="margin-bottom: 30px;">
-          <h3 style="font-size: 14px; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; margin-bottom: 10px;">Recapitulatif des articles</h3>
+        <div style="margin-bottom: 40px;">
           <table style="width: 100%; border-collapse: collapse;">
-            ${articlesHTML}
+            <thead>
+              <tr style="border-bottom: 2px solid #e2e8f0;">
+                <th style="padding: 0 0 12px 0; text-align: left; font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Description des articles</th>
+                <th style="padding: 0 0 12px 0; text-align: right; font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Montant (Ar)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${articlesHTML}
+            </tbody>
           </table>
-          
-          <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #333;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-size: 14px; font-weight: bold; text-transform: uppercase;">Total de la commande :</span>
-              <span style="font-size: 20px; font-weight: 900; color: #800020;">${formatAr(
-                commandeValidee.total
-              )} Ar</span>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 40px;">
+          <div style="width: 380px;">
+            <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9;">
+              <span style="font-size: 13px; font-weight: 600; color: #64748b;">Sous-total</span>
+              <span style="font-size: 14px; font-weight: 800; color: #0f172a;">${formatAr(totalArticles)} Ar</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 2px solid #e2e8f0;">
+              <span style="font-size: 13px; font-weight: 600; color: #64748b;">Frais de livraison</span>
+              <span style="font-size: 14px; font-weight: 800; color: #0f172a;">${fraisLiv === 0 ? "GRATUIT" : '+ ' + formatAr(fraisLiv) + ' Ar'}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 24px; background: #0f172a; color: white; border-radius: 16px; margin-top: 16px; box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.2);">
+              <span style="font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Total Net</span>
+              <span style="font-size: 28px; font-weight: 900; letter-spacing: -1px;">${formatAr(commandeValidee.total)} Ar</span>
             </div>
             
-            ${
-              isCmdSurCommande
-                ? `
-              <div style="background-color: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; margin-top: 15px;">
-                <p style="margin: 0 0 10px 0; font-size: 12px; color: #374151; font-weight: bold; text-transform: uppercase; text-align: center; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px;">Echeancier de paiement (Pre-commande)</p>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; background-color: #fff7ed; padding: 5px 8px; border-radius: 4px;">
-                  <span style="font-size: 13px; font-weight: 900; color: #c2410c;">1. Acompte de reservation (60%) :</span>
-                  <span style="font-size: 14px; font-weight: 900; color: #c2410c;">${formatAr(
-                    acompte
-                  )} Ar</span>
+            ${isCmdSurCommande ? `
+              <div style="margin-top: 16px; background: #fff7ed; padding: 16px; border-radius: 12px; border: 1px dashed #fdba74;">
+                <p style="margin: 0 0 12px 0; font-size: 10px; font-weight: 900; color: #c2410c; text-transform: uppercase; letter-spacing: 1px; text-align: center;">Modalités Pré-commande</p>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                  <span style="font-size: 12px; font-weight: 700; color: #9a3412;">1. Acompte (60%) :</span>
+                  <span style="font-size: 13px; font-weight: 900; color: #9a3412;">${formatAr(acompte)} Ar</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; padding: 5px 8px;">
-                  <span style="font-size: 12px; font-weight: bold; color: #333;">2. A payer a la reception (40% + Liv.) :</span>
-                  <span style="font-size: 13px; font-weight: bold; color: #333;">${formatAr(
-                    reste
-                  )} Ar</span>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="font-size: 12px; font-weight: 600; color: #ea580c;">2. Reste à la livraison :</span>
+                  <span style="font-size: 13px; font-weight: 800; color: #ea580c;">${formatAr(reste)} Ar</span>
                 </div>
               </div>
-            `
-                : ""
-            }
+            ` : ''}
+
           </div>
         </div>
 
-        <div style="background: #f4f4f4; padding: 20px; border-radius: 8px; border-left: 5px solid #800020;">
-          <h4 style="margin: 0 0 10px 0; font-size: 13px; color: #800020;">🛰️ Comment suivre votre colis ?</h4>
-          <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #555;">
-            Vous pouvez suivre l'etat de votre livraison a tout moment sur notre site :<br/>
-            <strong style="color: #333;">Lien :</strong> ${
-              window.location.origin
-            }/#/recherche_suivi<br/>
-            Il vous suffira de saisir votre <strong>Numero WhatsApp</strong> et votre <strong>Numero de Suivi</strong> (${
-              commandeValidee.numero
-            }).
+        <div style="border-top: 1px solid #f1f5f9; padding-top: 24px; text-align: center;">
+          <p style="margin: 0 0 8px 0; font-size: 14px; font-weight: 800; color: #0f172a;">Merci pour votre confiance !</p>
+          <p style="margin: 0; font-size: 10px; font-weight: 500; color: #94a3b8;">
+            Ce reçu est généré automatiquement. Conservez votre numéro de suivi pour suivre l'état de votre commande sur notre site.
           </p>
+        </div>
+
+      </div>
+    `;
+
+    // 🌟 LE SECRET ANTI-PIXELISATION : scale à 4 (résolution x4)
+    const options = {
+      margin: 0,
+      filename: `Recu_Provisoire_${commandeValidee.numero}.pdf`,
+      image: { type: "jpeg", quality: 1 },
+      html2canvas: { 
+        scale: 4, 
+        useCORS: true,
+        letterRendering: true,
+        scrollX: 0,
+        scrollY: 0
+      },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    };
+    // Alerte pour l'UX mobile
+    alert("📥 Préparation de votre reçu... Le téléchargement va démarrer dans un instant. Vérifiez vos notifications.");
+
+    html2pdf().set(options).from(element).save();
+  };
+// ======================================================================
+  // 🟢 GÉNÉRATION DU PDF DEPUIS LA PAGE DE SUIVI (DESIGN ULTRA PRO)
+  // ======================================================================
+  const genererPDFDepuisSuivi = (typeDocument) => {
+    if (!commandeSuivi) return;
+
+    const articles = commandeSuivi.articles_json?.articles || [];
+    const montantArticles = Number(commandeSuivi.montant_total) || 0;
+    const fraisLiv = Number(commandeSuivi.frais_livraison) || 0;
+    const totalGlobal = montantArticles + fraisLiv;
+    
+    const modePaiement = commandeSuivi.articles_json?.methode_paiement || 'À la livraison';
+    const typeLivraison = commandeSuivi.articles_json?.type_livraison === 'PROVINCE' 
+      ? `Province (${commandeSuivi.articles_json?.ville_destination || 'Non spécifié'})` 
+      : 'Tananarive';
+
+    const articlesHTML = articles.map((item, index) => `
+      <tr style="border-bottom: 1px solid #f3f4f6; background-color: ${index % 2 === 0 ? '#ffffff' : '#fafafa'};">
+        <td style="padding: 16px 20px; font-size: 12px; color: #111827; font-weight: 800;">
+          ${item.nom}
+          ${item.sur_commande ? `<br/><span style="display: inline-block; margin-top: 6px; padding: 3px 8px; background: #fff7ed; color: #ea580c; border-radius: 4px; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px;">📦 Pré-commande</span>` : ""}
+        </td>
+        <td style="padding: 16px 20px; font-size: 12px; color: #4b5563; text-align: center; font-weight: 900;">
+          ${item.qte}
+        </td>
+        <td style="padding: 16px 20px; font-size: 12px; color: #6b7280; text-align: right; font-weight: 600;">
+          ${formatAr(item.prix_vente)} Ar
+        </td>
+        <td style="padding: 16px 20px; font-size: 13px; color: #111827; text-align: right; font-weight: 900;">
+          ${formatAr(item.prix_vente * item.qte)} Ar
+        </td>
+      </tr>
+    `).join("");
+
+    const dateAffichage = typeDocument === "FACTURE DÉFINITIVE"
+      ? new Date().toLocaleDateString("fr-FR")
+      : new Date(commandeSuivi.date_commande).toLocaleDateString("fr-FR");
+
+    const colorTheme = typeDocument === "FACTURE DÉFINITIVE" ? "#0f172a" : "#800020";
+    const badgeColor = commandeSuivi.statut.includes("Annulée") ? "#ef4444" : commandeSuivi.statut.includes("Livré") ? "#10b981" : "#f59e0b";
+
+    const element = document.createElement("div");
+    element.innerHTML = `
+      <div style="width: 800px; padding: 50px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; position: relative; overflow: hidden; box-sizing: border-box;">
+        
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.04; z-index: 0; pointer-events: none;">
+          <img src="${LOGO_URL}" crossorigin="anonymous" style="width: 500px; filter: grayscale(100%);" />
+        </div>
+
+        <div style="position: relative; z-index: 10;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 50px;">
+            <div>
+              <img src="${LOGO_URL}" crossorigin="anonymous" style="height: 65px; object-fit: contain; margin-bottom: 15px;" />
+              <h2 style="margin: 0 0 5px 0; color: #111827; font-size: 20px; font-weight: 900; letter-spacing: -0.5px;">HAKIMI PLUS</h2>
+              <p style="margin: 0 0 3px 0; font-size: 11px; color: #6b7280; font-weight: 600;">Alimentaire&informatique</p>
+              <p style="margin: 0 0 3px 0; font-size: 11px; color: #6b7280;">Anosizato Atsinanana, Antananarivo</p>
+              <p style="margin: 0; font-size: 11px; color: #6b7280;">Tél : 034 86 972 98 / 032 15 266 01</p>
+            </div>
+            
+            <div style="text-align: right;">
+              <h1 style="margin: 0 0 15px 0; font-size: 38px; font-weight: 900; color: ${colorTheme}; text-transform: uppercase; letter-spacing: 1px;">
+                ${typeDocument === "FACTURE DÉFINITIVE" ? "FACTURE" : "REÇU"}
+              </h1>
+              
+              <div style="display: inline-block; background: #f8fafc; padding: 15px 20px; border-radius: 12px; text-align: left; min-width: 220px; border: 1px solid #e2e8f0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                  <span style="font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Réf. Commande</span>
+                  <span style="font-size: 12px; font-weight: 900; color: #0f172a;">${commandeSuivi.numero_commande}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                  <span style="font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Date</span>
+                  <span style="font-size: 12px; font-weight: 900; color: #0f172a;">${dateAffichage}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e8f0;">
+                  <span style="font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Statut</span>
+                  <span style="font-size: 10px; font-weight: 900; color: white; background-color: ${badgeColor}; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">
+                    ${commandeSuivi.statut}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 20px; margin-bottom: 40px;">
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 16px; padding: 25px; border-top: 5px solid ${colorTheme}; background: #fff;">
+              <h3 style="margin: 0 0 15px 0; font-size: 10px; text-transform: uppercase; color: #94a3b8; font-weight: 900; letter-spacing: 1px;">Facturé & Livré à</h3>
+              <p style="margin: 0 0 8px 0; font-size: 18px; font-weight: 900; color: #0f172a; text-transform: uppercase;">${commandeSuivi.client_nom}</p>
+              <p style="margin: 0 0 6px 0; font-size: 12px; color: #475569; line-height: 1.5;">📍 ${commandeSuivi.quartier} <br/> ${commandeSuivi.adresse_detail || ''}</p>
+              <p style="margin: 0; font-size: 12px; color: #475569;">📞 WhatsApp : <strong>${commandeSuivi.client_whatsapp}</strong> ${commandeSuivi.client_whatsapp2 ? ' / ' + commandeSuivi.client_whatsapp2 : ''}</p>
+            </div>
+            
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 16px; padding: 25px; background: #f8fafc;">
+              <h3 style="margin: 0 0 15px 0; font-size: 10px; text-transform: uppercase; color: #94a3b8; font-weight: 900; letter-spacing: 1px;">Détails Logistiques</h3>
+              <div style="margin-bottom: 12px;">
+                <span style="display: block; font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;">Méthode de paiement</span>
+                <span style="font-size: 14px; font-weight: 900; color: #0f172a;">${modePaiement}</span>
+              </div>
+              <div style="margin-bottom: 12px;">
+                <span style="display: block; font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;">Zone de livraison</span>
+                <span style="font-size: 14px; font-weight: 900; color: #0f172a;">${typeLivraison}</span>
+              </div>
+              ${commandeSuivi.articles_json?.message_expedition ? `
+                <div>
+                  <span style="display: block; font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;">Note d'expédition</span>
+                  <span style="font-size: 12px; color: #475569; font-style: italic;">"${commandeSuivi.articles_json.message_expedition}"</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+
+          <div style="border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-bottom: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background-color: #f1f5f9; border-bottom: 2px solid #e2e8f0;">
+                  <th style="padding: 16px 20px; text-align: left; font-size: 10px; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Description de l'article</th>
+                  <th style="padding: 16px 20px; text-align: center; font-size: 10px; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Qté</th>
+                  <th style="padding: 16px 20px; text-align: right; font-size: 10px; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Prix Unit.</th>
+                  <th style="padding: 16px 20px; text-align: right; font-size: 10px; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Montant Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${articlesHTML}
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="width: 45%; padding-right: 30px;">
+              <h4 style="margin: 0 0 10px 0; font-size: 10px; text-transform: uppercase; color: #94a3b8; font-weight: 900; letter-spacing: 1px;">Conditions & Remarques</h4>
+              <p style="margin: 0; font-size: 10px; color: #64748b; line-height: 1.6; text-align: justify;">
+              Les articles doivent être vérifiés à la livraison. Aucun retour accepté après départ du livreur. L’acompte pour une précommande est non remboursable, sauf en cas de produit non conforme.
+              </p>
+            </div>
+            
+            <div style="width: 380px;">
+              <div style="display: flex; justify-content: space-between; padding: 12px 10px; font-size: 13px; color: #475569; border-bottom: 1px solid #e2e8f0;">
+                <span style="font-weight: 600;">Sous-total articles</span>
+                <span style="font-weight: 900; color: #0f172a;">${formatAr(montantArticles)} Ar</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 12px 10px; font-size: 13px; color: #475569; border-bottom: 2px solid #cbd5e1;">
+                <span style="font-weight: 600;">Frais de livraison / Expédition</span>
+                <span style="font-weight: 900; color: #0f172a;">+ ${formatAr(fraisLiv)} Ar</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px; background-color: ${colorTheme}; border-radius: 12px; margin-top: 15px; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <span style="font-size: 14px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px;">Total Net à Payer</span>
+                <span style="font-size: 26px; font-weight: 900; letter-spacing: -0.5px;">${formatAr(totalGlobal)} Ar</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 80px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 25px;">
+            <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: 900; color: #0f172a;">Merci de votre confiance !</p>
+            <p style="margin: 0; font-size: 9px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px;">
+              Hakimi Plus - NIF : 6017743793 - STAT : 47110112023001634
+            </p>
+          </div>
         </div>
       </div>
     `;
 
     const options = {
       margin: 0,
-      filename: `Recu_HakimiPlus_${commandeValidee.numero}.pdf`,
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2 },
+      filename: `${typeDocument === "FACTURE DÉFINITIVE" ? "Facture" : "Recu_Provisoire"}_${commandeSuivi.numero_commande}.pdf`,
+      image: { type: "jpeg", quality: 1 },
+      html2canvas: { 
+        scale: 3, 
+        useCORS: true,
+        letterRendering: true
+      },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
     };
-
+// Alerte pour l'UX mobile
+alert("📥 Préparation de votre document... Le téléchargement va démarrer dans un instant. Vérifiez vos notifications.");
     html2pdf().set(options).from(element).save();
   };
-
   if (isCheckingMaintenance) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-16 h-16 border-4 border-[#800020] border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center">
+        <div className="relative flex justify-center items-center mb-8">
+          {/* Les orbites qui tournent */}
+          <div className="absolute w-32 h-32 border-2 border-gray-200 border-t-[#800020] rounded-full animate-spin"></div>
+          <div className="absolute w-24 h-24 border-2 border-gray-200 border-b-[#800020] rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+          {/* Le logo central qui respire */}
+          <img src={LOGO_URL} alt="Hakimi Plus" className="w-16 h-16 object-contain animate-pulse drop-shadow-2xl" />
+        </div>
+        <p className="text-[#800020] font-black text-[10px] uppercase tracking-[0.3em] animate-pulse">Initialisation...</p>
       </div>
     );
   }
@@ -722,8 +1075,20 @@ export default function App() {
     <div className="min-h-screen font-sans flex flex-col bg-gray-50 text-gray-800 transition-colors duration-500">
       {/* HEADER PREMIUM */}
       <header className="sticky top-0 z-50 shadow-sm border-b transition-colors duration-500 bg-white border-gray-200">
-        <div className="text-center py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors duration-500 bg-gray-100 text-gray-500">
-          LIVRAISON TANA & PROVINCE
+        {/* 📢 BANDEAU D'URGENCE ANIMÉ */}
+        <div className="text-center py-2 text-[10px] md:text-xs font-black uppercase tracking-[0.15em] bg-[#800020] text-white relative overflow-hidden h-8 flex items-center justify-center shadow-inner">
+          {messagesBanniere.map((msg, idx) => (
+            <span
+              key={idx}
+              className={`absolute w-full px-2 transition-all duration-700 ease-in-out ${
+                indexBanniere === idx
+                  ? "opacity-100 translate-y-0"
+                  : "opacity-0 translate-y-full"
+              }`}
+            >
+              {msg}
+            </span>
+          ))}
         </div>
 
         <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center gap-4">
@@ -745,15 +1110,22 @@ export default function App() {
                 <line x1="3" y1="18" x2="21" y2="18"></line>
               </svg>
             </button>
-            <div
-              className="cursor-pointer bg-white rounded-lg px-1"
-              onClick={() => setView("accueil")}
-            >
+            <div className="flex items-center gap-2 cursor-pointer bg-white rounded-lg px-1 py-1">
               <img
+                onClick={() => setView("accueil")}
                 src={LOGO_URL}
                 alt="Logo"
                 className="h-10 md:h-16 lg:h-20 object-contain"
               />
+              {/* LE BOUTON D'INSTALLATION INTELLIGENT */}
+              {isInstallable && !isInstalled && (
+                <button
+                  onClick={handleInstallClick}
+                  className="md:hidden bg-[#800020] text-white text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full shadow-md animate-pulse border border-red-900"
+                >
+                  Installer l'App
+                </button>
+              )}
             </div>
           </div>
 
@@ -845,28 +1217,89 @@ export default function App() {
               </svg>
             </button>
 
-            <button
-              onClick={() => setView("panier")}
-              className="relative p-2 transition-colors text-gray-800 hover:text-[#800020]"
+            <div 
+              className="relative flex items-center h-full"
+              onMouseEnter={() => setShowMiniCart(true)}
+              onMouseLeave={() => setShowMiniCart(false)}
             >
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
+              <button
+                onClick={() => { setView("panier"); setShowMiniCart(false); }}
+                className="relative p-2 transition-colors text-gray-800 hover:text-[#800020]"
               >
-                <circle cx="9" cy="21" r="1"></circle>
-                <circle cx="20" cy="21" r="1"></circle>
-                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-              </svg>
-              {panier.length > 0 && (
-                <span className="absolute top-0 right-0 text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full bg-[#800020]">
-                  {panier.length}
-                </span>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="9" cy="21" r="1"></circle>
+                  <circle cx="20" cy="21" r="1"></circle>
+                  <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                </svg>
+                {panier.length > 0 && (
+                  <span className="absolute top-0 right-0 text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full bg-[#800020] animate-bounce">
+                    {panier.length}
+                  </span>
+                )}
+              </button>
+
+              {/* MINI PANIER FLOTTANT (STYLE AMAZON) */}
+              {showMiniCart && (
+                /* LE PONT INVISIBLE EST ICI : top-full et pt-4 (padding-top) */
+                <div className="absolute right-0 top-full pt-4 w-80 z-[300]">
+                  <div className="bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                    {panier.length === 0 ? (
+                      <div className="p-8 text-center">
+                        <span className="text-4xl mb-2 block drop-shadow-sm">🛒</span>
+                        <p className="text-gray-400 font-bold text-sm">Votre panier est vide.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="max-h-64 overflow-y-auto p-4 space-y-4 no-scrollbar">
+                          {panier.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-3 border-b border-gray-50 pb-3 last:border-0 last:pb-0">
+                              <div className="w-12 h-12 bg-gray-50 rounded-lg flex items-center justify-center shrink-0 border border-gray-100 p-1">
+                                {item.image_url ? (
+                                  <img src={item.image_url} alt={item.nom} className="w-full h-full object-contain" />
+                                ) : (
+                                  <span className="text-[8px] text-gray-400 font-bold">Image</span>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-black text-gray-800 truncate">{item.nom}</p>
+                                <p className="text-[10px] font-bold text-gray-400 mt-0.5">Qté: {item.qte} × {formatAr(item.prix_vente)} Ar</p>
+                              </div>
+                              <div className="text-right shrink-0 flex flex-col items-end">
+                              <p className="text-xs font-black text-[#800020]">{formatAr(item.prix_vente * item.qte)} Ar</p>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); removeFromCart(item.id); }}
+                                className="text-[9px] text-gray-400 hover:text-red-600 font-bold uppercase mt-1 flex items-center gap-1 transition-colors"
+                              >
+                                <svg width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                Retirer
+                              </button>
+                            </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="bg-gray-50 p-4 border-t border-gray-100">
+                          <div className="flex justify-between items-center mb-4">
+                            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Sous-total</span>
+                            <span className="text-lg font-black text-[#800020]">
+                              {formatAr(panier.reduce((acc, item) => acc + Number(item.prix_vente) * item.qte, 0))} Ar
+                            </span>
+                          </div>
+                          <button 
+                            onClick={() => { setView("panier"); setShowMiniCart(false); }}
+                            className="w-full bg-[#800020] hover:bg-black text-white py-3.5 rounded-xl font-black uppercase text-[11px] tracking-widest transition-colors shadow-md flex justify-center items-center gap-2"
+                          >
+                            Aller au panier ➔
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
+             
           </div>
         </div>
 
@@ -1300,6 +1733,7 @@ export default function App() {
                           Inspirations & Astuces
                         </h2>
                       </div>
+                     
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {rubriques.map((rubrique, idx) => (
                           <div
@@ -1361,10 +1795,10 @@ export default function App() {
           </div>
         )}
 
-        {/* ======================================================= */}
+      {/* ======================================================= */}
         {/* VUE : CATALOGUE (DESIGN UBER EATS) */}
         {/* ======================================================= */}
-        {view.startsWith("catalogue") && (
+        {(view.startsWith("catalogue") || view.startsWith("informatique")) && (
           <div className="max-w-7xl mx-auto px-4 mt-4 mb-12 animate-in fade-in duration-500">
             {/* TITRE ÉPURÉ */}
             <div className="flex items-center gap-3 mb-6">
@@ -1374,13 +1808,10 @@ export default function App() {
               </h2>
             </div>
 
-            {/* CATÉGORIES PRINCIPALES (Scroll horizontal) */}
-            <div
-              className="flex overflow-x-auto gap-3 mb-4 pb-2 no-scrollbar"
-              style={{ scrollSnapType: "x mandatory" }}
-            >
+          {/* CATÉGORIES PRINCIPALES (Séparées par univers) */}
+          <div className="flex overflow-x-auto gap-3 mb-4 pb-2 no-scrollbar" style={{ scrollSnapType: "x mandatory" }}>
               <button
-                onClick={() => setView("catalogue")}
+                onClick={() => setView(view.startsWith("informatique") ? "informatique" : "catalogue")}
                 className={`whitespace-nowrap shrink-0 snap-start px-5 py-2.5 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
                   menuActuel === ""
                     ? "bg-gray-900 text-white shadow-md"
@@ -1389,22 +1820,32 @@ export default function App() {
               >
                 Tous
               </button>
-              {menusWeb.map((menu, idx) => {
-                const nomMenu = menu.PARENT || menu.parent;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => setView("catalogue/" + nomMenu)}
-                    className={`whitespace-nowrap shrink-0 snap-start px-5 py-2.5 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
-                      menuActuel === nomMenu
-                        ? "bg-gray-900 text-white shadow-md"
-                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    {nomMenu}
-                  </button>
-                );
-              })}
+              {menusWeb
+                .filter((menu) => {
+                  const nom = (menu.PARENT || menu.parent).toUpperCase();
+                  const isTech = nom === "INFORMATIQUE" || nom === "SERVICES";
+                  // On cache l'informatique de la boutique, et la boutique de l'informatique
+                  return view.startsWith("informatique") ? isTech : !isTech;
+                })
+                .map((menu, idx) => {
+                  const nomMenu = menu.PARENT || menu.parent;
+                  const isSurCommande = nomMenu.toUpperCase() === "SUR COMMANDE";
+                  const prefixeBase = view.startsWith("informatique") ? "informatique" : "catalogue";
+                  
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => setView(`${prefixeBase}/` + nomMenu)}
+                      className={`whitespace-nowrap shrink-0 snap-start px-5 py-2.5 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
+                        menuActuel === nomMenu
+                          ? (isSurCommande ? "bg-[#ea580c] text-white shadow-md border-transparent" : "bg-gray-900 text-white shadow-md border-transparent")
+                          : (isSurCommande ? "bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100" : "bg-gray-100 text-gray-600 border border-transparent hover:bg-gray-200")
+                      }`}
+                    >
+                      {nomMenu}
+                    </button>
+                  );
+                })}
             </div>
 
             {/* SOUS-CATÉGORIES (Boutons Pilules) */}
@@ -1414,7 +1855,7 @@ export default function App() {
                 style={{ scrollSnapType: "x mandatory" }}
               >
                 <button
-                  onClick={() => setView(`catalogue/${menuActuel}`)}
+                  onClick={() => setView(`${view.startsWith("informatique") ? "informatique" : "catalogue"}/${menuActuel}`)}
                   className={`whitespace-nowrap shrink-0 snap-start px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all border ${
                     sousCatActuelle === "TOUS LES PRODUITS"
                       ? "bg-white text-gray-900 border-gray-900 shadow-sm"
@@ -1431,7 +1872,7 @@ export default function App() {
                         <button
                           key={idx}
                           onClick={() =>
-                            setView(`catalogue/${menuActuel}/${sc}`)
+                            setView(`${view.startsWith("informatique") ? "informatique" : "catalogue"}/${menuActuel}/${sc}`)
                           }
                           className={`whitespace-nowrap shrink-0 snap-start px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all border ${
                             sousCatActuelle === sc
@@ -1446,7 +1887,6 @@ export default function App() {
                   )}
               </div>
             )}
-
             {/* TRI ET RECHERCHE */}
             <div className="mb-6 flex justify-end">
               <div className="flex gap-2 w-full md:w-auto">
@@ -1500,12 +1940,12 @@ export default function App() {
                     >
                       <div className="relative overflow-hidden aspect-square flex items-center justify-center bg-white rounded-xl mb-3">
                         {p.image_url ? (
-                          <img
-                            src={p.image_url}
-                            alt={p.nom}
-                            loading="lazy"
-                            className="max-h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
-                          />
+                         <img
+                         src={p.image_url}
+                         alt={p.nom}
+                         loading="lazy"
+                         className="max-h-full object-contain transform-gpu will-change-transform group-hover:scale-105 transition-transform duration-300"
+                       />
                         ) : (
                           <span className="text-gray-300 text-xs font-bold">
                             Image
@@ -1760,6 +2200,71 @@ export default function App() {
                 </div>
               </div>
             </div>
+            {/* 🎁 SECTION CROSS-SELLING (ACHATS COMPULSIFS ALÉATOIRES) 🎁 */}
+            {produitsAleatoires.length > 0 && (
+              <div className="mt-12 mb-8 border-t border-gray-100 pt-8 animate-in fade-in duration-500">
+                <h3 className="text-lg md:text-xl font-black uppercase text-gray-900 mb-6 flex items-center gap-2">
+                  <span className="w-1.5 h-6 bg-[#800020] rounded-full inline-block"></span>
+                  Vous aimerez aussi...
+                </h3>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {produitsAleatoires.map((p) => {
+                    const enRupture = Number(p.stock_actuel) <= 0;
+                    return (
+                      <div
+                        key={p.id}
+                        className="bg-white p-3 rounded-2xl border border-gray-100 flex flex-col justify-between hover:shadow-lg hover:border-gray-300 transition-all cursor-pointer group"
+                        onClick={() => {
+                          setProduitSelectionne(p);
+                          setView("produit/" + p.id);
+                          // On remonte tout en haut doucement quand il clique
+                          window.scrollTo({ top: 0, behavior: "smooth" }); 
+                        }}
+                      >
+                        <div className="relative overflow-hidden aspect-square flex items-center justify-center bg-gray-50 rounded-xl mb-3">
+                          {p.image_url ? (
+                            <img
+                              src={p.image_url}
+                              alt={p.nom}
+                              loading="lazy"
+                              className="max-h-full object-contain group-hover:scale-110 transition-transform duration-500 p-1"
+                            />
+                          ) : (
+                            <span className="text-gray-300 text-xs font-bold">Image</span>
+                          )}
+                          {p.sur_commande === true && (
+                            <div className="absolute top-2 right-2 bg-orange-100 text-orange-700 text-[9px] font-black px-2 py-1 rounded shadow-sm uppercase">
+                              Pré-commande
+                            </div>
+                          )}
+                        </div>
+                        
+                        <p className="text-[9px] font-bold text-gray-400 uppercase mb-1">
+                          {p.categorie_web || "Divers"}
+                        </p>
+                        
+                        <h3 className="font-semibold text-[12px] mb-2 leading-snug text-gray-800 group-hover:text-[#800020] transition-colors line-clamp-2">
+                          {p.nom}
+                        </h3>
+                        
+                        <div className="mt-auto pt-2 border-t border-gray-50">
+                          {p.prix_promo && new Date(p.promo_debut) <= new Date() && new Date(p.promo_fin) >= new Date() ? (
+                            <p className="text-sm font-black text-red-600">
+                              {formatAr(p.prix_promo)} Ar
+                            </p>
+                          ) : (
+                            <p className={`text-sm font-black ${enRupture && !p.sur_commande ? "text-gray-400 line-through" : "text-gray-900"}`}>
+                              {formatAr(p.prix_vente)} Ar
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2012,7 +2517,7 @@ export default function App() {
                         </label>
                         <input
                           className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg font-bold text-sm text-gray-800 outline-none focus:border-[#800020] transition-colors"
-                          placeholder="Ex: Jean Dupont"
+                          placeholder="Ex: Rabe Rakoto"
                           value={formClient.nom}
                           onChange={(e) =>
                             setFormClient({
@@ -2022,7 +2527,7 @@ export default function App() {
                           }
                           required
                           disabled={isSubmitting}
-                        />
+                    />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -2068,80 +2573,76 @@ export default function App() {
                           Zone de livraison *
                         </label>
                         <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
-                          <button
-                            type="button"
-                            onClick={() => handleShippingChange("TANA")}
-                            className={`flex-1 py-1.5 rounded-md font-black text-[11px] uppercase transition-all ${
-                              formClient.type_livraison === "TANA"
-                                ? "bg-white text-gray-900 shadow-sm"
-                                : "text-gray-400 hover:text-gray-600"
-                            }`}
-                          >
-                            📍 Tana
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleShippingChange("PROVINCE")}
-                            className={`flex-1 py-1.5 rounded-md font-black text-[11px] uppercase transition-all ${
-                              formClient.type_livraison === "PROVINCE"
-                                ? "bg-white text-blue-600 shadow-sm"
-                                : "text-gray-400 hover:text-gray-600"
-                            }`}
-                          >
-                            🚚 Province
-                          </button>
+                          {panier.some(p => p.categorie_web === "Services" || p.sous_categorie_web === "Services") ? (
+                            <button type="button" className="flex-1 py-1.5 rounded-md font-black text-[11px] uppercase bg-white text-purple-600 shadow-sm cursor-default">
+                              💻 Envoi Numérique (Obligatoire)
+                            </button>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => handleShippingChange("TANA")} className={`flex-1 py-1.5 rounded-md font-black text-[11px] uppercase transition-all ${formClient.type_livraison === "TANA" ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"}`}>📍 Tana</button>
+                              <button type="button" onClick={() => handleShippingChange("PROVINCE")} className={`flex-1 py-1.5 rounded-md font-black text-[11px] uppercase transition-all ${formClient.type_livraison === "PROVINCE" ? "bg-white text-blue-600 shadow-sm" : "text-gray-400 hover:text-gray-600"}`}>🚚 Province</button>
+                            </>
+                          )}
                         </div>
                       </div>
                       {formClient.type_livraison === "TANA" ? (
                         <div className="space-y-3">
-                          <div>
+                          <div className="relative">
                             <input
-                              list="quartiers-list"
+                              type="text"
                               className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg font-bold outline-none focus:border-[#800020] transition-colors"
                               placeholder="🔍 Taper ou choisir un quartier..."
                               required
                               value={formClient.quartier}
-                              onChange={(e) =>
-                                setFormClient({
-                                  ...formClient,
-                                  quartier: e.target.value,
-                                })
-                              }
+                              onChange={(e) => {
+                                setFormClient({ ...formClient, quartier: e.target.value });
+                                setShowQuartiersDropdown(true);
+                              }}
+                              onFocus={() => setShowQuartiersDropdown(true)}
+                              onBlur={() => setTimeout(() => setShowQuartiersDropdown(false), 200)}
+                              disabled={isSubmitting}
+                              autoComplete="off"
                             />
-                            <datalist id="quartiers-list">
-                              {quartiersDb.map((q) => (
-                                <option key={q.nom} value={q.nom}>
-                                  {q.nom} (+{formatAr(q.frais)} Ar)
-                                </option>
-                              ))}
-                            </datalist>
+                            {showQuartiersDropdown && (
+                              <ul className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                                {quartiersDb
+                                  .filter((q) => q.nom.toLowerCase().includes(formClient.quartier.toLowerCase()))
+                                  .map((q) => (
+                                    <li
+                                      key={q.nom}
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() => {
+                                        setFormClient({ ...formClient, quartier: q.nom });
+                                        setShowQuartiersDropdown(false);
+                                      }}
+                                      className="p-3 hover:bg-gray-50 cursor-pointer flex justify-between items-center transition-colors"
+                                    >
+                                      <span className="font-bold text-gray-800">{q.nom}</span>
+                                      <span className="text-xs font-black text-[#800020]">+{formatAr(q.frais)} Ar</span>
+                                    </li>
+                                  ))}
+                                {quartiersDb.filter((q) => q.nom.toLowerCase().includes(formClient.quartier.toLowerCase())).length === 0 && (
+                                  <li className="p-3 text-center text-gray-400 text-sm font-bold">Aucun quartier trouvé</li>
+                                )}
+                              </ul>
+                            )}
                           </div>
                           <textarea
                             className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg font-medium text-sm text-gray-800 outline-none h-14 resize-none focus:border-[#800020] transition-colors"
                             placeholder="Précisions: Lot, portail, bâtiment..."
                             value={formClient.adresse_detail}
-                            onChange={(e) =>
-                              setFormClient({
-                                ...formClient,
-                                adresse_detail: e.target.value,
-                              })
-                            }
+                            onChange={(e) => setFormClient({ ...formClient, adresse_detail: e.target.value })}
                             required
                             disabled={isSubmitting}
                           />
                         </div>
-                      ) : (
+                      ) : formClient.type_livraison === "PROVINCE" ? (
                         <div className="space-y-3">
                           <input
                             className="w-full p-2.5 bg-blue-50 border border-blue-200 text-blue-900 rounded-lg font-bold text-sm outline-none placeholder-blue-300 focus:border-blue-500 transition-colors"
                             placeholder="Ville de destination *"
                             value={formClient.ville}
-                            onChange={(e) =>
-                              setFormClient({
-                                ...formClient,
-                                ville: e.target.value,
-                              })
-                            }
+                            onChange={(e) => setFormClient({ ...formClient, ville: e.target.value })}
                             required
                             disabled={isSubmitting}
                           />
@@ -2149,20 +2650,28 @@ export default function App() {
                             className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg font-medium text-sm text-gray-800 outline-none h-14 resize-none focus:border-blue-500 transition-colors"
                             placeholder="Transporteur préféré, agence..."
                             value={formClient.message_expedition}
-                            onChange={(e) =>
-                              setFormClient({
-                                ...formClient,
-                                message_expedition: e.target.value,
-                              })
-                            }
+                            onChange={(e) => setFormClient({ ...formClient, message_expedition: e.target.value })}
                             disabled={isSubmitting}
                           />
                         </div>
-                      )}
-                      <div className="pt-2 border-t border-gray-100 mt-4">
-                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-2">
-                          Moyen de Paiement *
-                        </label>
+                      ) : formClient.type_livraison === "DIGITAL" ? (
+                        <div className="space-y-3 bg-purple-50 p-4 rounded-xl border border-purple-100 mt-3">
+                          <label className="text-[10px] font-bold text-purple-800 uppercase block mb-1">Recevoir la commande par :</label>
+                          <div className="flex gap-2 mb-2">
+                            <button type="button" onClick={() => setFormClient({...formClient, canal_digital: 'WHATSAPP'})} className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition-all ${formClient.canal_digital === 'WHATSAPP' ? 'bg-green-500 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>💬 WhatsApp</button>
+                            <button type="button" onClick={() => setFormClient({...formClient, canal_digital: 'EMAIL'})} className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition-all ${formClient.canal_digital === 'EMAIL' ? 'bg-blue-500 text-white shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>📧 Email</button>
+                          </div>
+                          {formClient.canal_digital === 'EMAIL' ? (
+                            <input type="email" placeholder="Votre adresse Email *" className="w-full p-3 bg-white border border-purple-200 rounded-lg outline-none font-bold text-sm text-gray-800 focus:border-purple-500" value={formClient.email} onChange={e => setFormClient({...formClient, email: e.target.value})} required disabled={isSubmitting} />
+                          ) : (
+                            <p className="text-xs font-bold text-purple-700 bg-white p-2 rounded border border-purple-100 text-center">La livraison sera envoyée sur le numéro WhatsApp renseigné en haut.</p>
+                          )}
+                        </div>
+                      ) : null}
+                    <div className="pt-2 border-t border-gray-100 mt-4">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-2">
+                        Moyen de Paiement *
+                      </label>
                         <div className="flex gap-2">
                           {formClient.type_livraison === "TANA" && (
                             <button
@@ -2216,15 +2725,34 @@ export default function App() {
                           </button>
                         </div>
                       </div>
-                      <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="w-full bg-[#800020] text-white p-3.5 rounded-lg font-black uppercase text-sm shadow-md hover:bg-gray-900 transition-colors mt-4 flex justify-center items-center gap-2"
-                      >
-                        {isSubmitting
-                          ? "Traitement en cours..."
-                          : "Valider la commande"}
-                      </button>
+                     {/* VÉRIFICATION VISUELLE DU MINIMUM DE COMMANDE */}
+                     {(() => {
+                        const minRequis = formClient.type_livraison === "TANA" ? minCommandes.tana : minCommandes.province;
+                        const isMinAtteint = totalPanier >= minRequis;
+
+                        return (
+                          <>
+                            {minRequis > 0 && !isMinAtteint && (
+                              <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-[11px] font-black text-center mt-4 animate-pulse">
+                                ⚠️ Minimum d'achat non atteint ({formatAr(totalPanier)} / {formatAr(minRequis)} Ar)
+                              </div>
+                            )}
+                            <button
+                              type="submit"
+                              disabled={isSubmitting || (minRequis > 0 && !isMinAtteint)}
+                              className={`w-full p-3.5 rounded-lg font-black uppercase text-sm shadow-md transition-colors mt-4 flex justify-center items-center gap-2 ${
+                                minRequis > 0 && !isMinAtteint 
+                                  ? "bg-gray-300 text-gray-500 cursor-not-allowed" 
+                                  : "bg-[#800020] text-white hover:bg-gray-900"
+                              }`}
+                            >
+                              {isSubmitting
+                                ? "Traitement en cours..."
+                                : "Valider la commande"}
+                            </button>
+                          </>
+                        );
+                      })()}
                     </form>
                   </div>
                 </div>
@@ -2407,19 +2935,71 @@ export default function App() {
                       <span className="font-bold text-gray-500">Adresse :</span>{" "}
                       {commandeSuivi.quartier} - {commandeSuivi.adresse_detail}
                     </p>
-                    <div className="border-t border-gray-200 pt-3 flex justify-between items-center">
-                      <span className="font-black text-[#800020] uppercase text-sm">
-                        Total à payer
-                      </span>
-                      <span className="font-black text-[#800020] text-2xl">
-                        {formatAr(
-                          Number(commandeSuivi.montant_total) +
+
+                    {/* LISTE DES ARTICLES */}
+                    {commandeSuivi.articles_json && commandeSuivi.articles_json.articles && commandeSuivi.articles_json.articles.length > 0 && (
+                      <div className="mb-4 bg-white p-3 rounded-xl border border-gray-100">
+                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 border-b border-gray-100 pb-2">
+                          Articles commandés
+                        </h4>
+                        <ul className="space-y-2">
+                          {commandeSuivi.articles_json.articles.map((article, idx) => (
+                            <li key={idx} className="flex justify-between items-center text-sm border-b border-gray-50 pb-2 last:border-0 last:pb-0">
+                              <span className="text-gray-800 font-semibold">
+                                <span className="text-[#800020] font-black">{article.qte}x</span> {article.nom}
+                              </span>
+                              <span className="text-gray-600 font-bold text-xs">
+                                {formatAr(article.prix_vente * article.qte)} Ar
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* TOTAL DETAILLÉ */}
+                    <div className="border-t border-gray-200 pt-4 mt-4 space-y-2">
+                      <div className="flex justify-between items-center text-sm font-bold text-gray-600">
+                        <span>Sous-total articles</span>
+                        <span>{formatAr(commandeSuivi.montant_total)} Ar</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm font-bold text-gray-600">
+                        <span>Frais de livraison</span>
+                        <span>+ {formatAr(commandeSuivi.frais_livraison)} Ar</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-3 mt-2 border-t border-gray-200">
+                        <span className="font-black text-[#800020] uppercase text-sm">
+                          Total Global
+                        </span>
+                        <span className="font-black text-[#800020] text-2xl">
+                          {formatAr(
+                            Number(commandeSuivi.montant_total) +
                             Number(commandeSuivi.frais_livraison)
-                        )}{" "}
-                        Ar
-                      </span>
+                          )}{" "}
+                          Ar
+                        </span>
+                      </div>
                     </div>
                   </div>
+
+                  {/* BOUTONS PDF */}
+                  <div className="mt-6 space-y-3">
+                    <button
+                      onClick={() => genererPDFDepuisSuivi("REÇU PROVISOIRE WEB")}
+                      className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 p-3.5 rounded-xl font-bold text-sm transition shadow-sm flex items-center justify-center gap-2"
+                    >
+                      📄 Télécharger le reçu provisoire
+                    </button>
+                    {(commandeSuivi.statut === "Livrée" || commandeSuivi.statut === "Livré") && (
+                      <button
+                        onClick={() => genererPDFDepuisSuivi("FACTURE DÉFINITIVE")}
+                        className="w-full bg-[#800020] hover:bg-black text-white p-3.5 rounded-xl font-bold text-sm transition shadow-sm flex items-center justify-center gap-2 animate-in fade-in duration-500"
+                      >
+                        🧾 Télécharger la facture définitive
+                      </button>
+                    )}
+                  </div>
+
                 </div>
               )}
             </div>
@@ -2429,163 +3009,123 @@ export default function App() {
         {/* ======================================================= */}
         {/* VUE : SUCCES */}
         {/* ======================================================= */}
+       {/* ======================================================= */}
+        {/* VUE : SUCCES (DESIGN PREMIUM) */}
+        {/* ======================================================= */}
         {view === "succes" && commandeValidee && (
-          <div className="max-w-2xl mx-auto px-4 mt-12 mb-16 animate-in zoom-in-95 duration-300">
-            <div className="bg-white p-8 md:p-10 rounded-2xl shadow-lg border border-gray-100">
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-green-50 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg
-                    width="32"
-                    height="32"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    viewBox="0 0 24 24"
-                  >
+          <div className="max-w-3xl mx-auto px-4 mt-12 mb-20 animate-in zoom-in duration-500">
+            <div className="bg-white p-8 md:p-12 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.06)] border border-gray-100">
+              
+              {/* En-tête de succès */}
+              <div className="text-center mb-10">
+                <div className="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-green-100">
+                  <svg width="36" height="36" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" className="animate-[bounce_1s_ease-out]">
                     <path d="M20 6L9 17l-5-5"></path>
                   </svg>
                 </div>
-                <h2 className="text-3xl font-black text-gray-800 tracking-tight mb-2">
-                  Commande Confirmée
+                <h2 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight mb-3">
+                  Commande Validée
                 </h2>
-                <p className="text-gray-500 font-medium">
-                  Merci pour votre confiance,{" "}
-                  <span className="text-gray-800 font-bold">
-                    {commandeValidee.nom}
-                  </span>
-                  .
+                <p className="text-gray-500 font-medium md:text-lg">
+                  Merci <span className="text-gray-900 font-black">{commandeValidee.nom}</span>, votre demande a été traitée avec succès.
                 </p>
               </div>
 
-              <div className="bg-gray-50 rounded-xl p-6 border border-gray-200 mb-8">
-                <div className="text-center mb-6">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
-                    Votre Numéro de Suivi Unique
-                  </p>
-                  <p className="text-3xl font-black text-[#800020] tracking-widest bg-white inline-block px-4 py-2 rounded-lg border border-gray-200 shadow-sm select-all">
-                    {commandeValidee.numero}
-                  </p>
-                </div>
-
-                <div className="border-t border-gray-200 pt-4 mt-2">
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="text-xs font-black text-gray-900 uppercase tracking-widest">
-                      Total de la commande
-                    </span>
-                    <span className="text-2xl font-black text-[#800020] tracking-tighter">
-                      {formatAr(commandeValidee.total)} Ar
-                    </span>
+              {/* Carte de commande */}
+              <div className="bg-gray-50/80 rounded-2xl p-6 border border-gray-100 mb-10">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+                  <div className="text-center md:text-left w-full md:w-auto">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">N° de Commande</p>
+                    <p className="text-2xl font-black text-gray-900 tracking-widest bg-white px-5 py-3 rounded-xl shadow-sm border border-gray-200/60 select-all">
+                      {commandeValidee.numero}
+                    </p>
                   </div>
-
-                  {commandeValidee.articles.length > 0 &&
-                    commandeValidee.articles[0].sur_commande &&
-                    (() => {
-                      const totalArt = commandeValidee.articles.reduce(
-                        (acc, i) => acc + Number(i.prix_vente) * i.qte,
-                        0
-                      );
-                      const ac = Math.round(totalArt * 0.6);
-                      const rest = commandeValidee.total - ac;
-                      return (
-                        <div className="mt-4 pt-4 border-t border-gray-200">
-                          <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-3 text-center">
-                            Paiement en 2 fois (Pré-commande)
-                          </p>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center">
-                              <p className="text-[10px] font-black text-orange-800 uppercase tracking-widest mb-1">
-                                1. Acompte (60%)
-                              </p>
-                              <p className="text-xl font-black text-[#800020]">
-                                {formatAr(ac)} Ar
-                              </p>
-                            </div>
-                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 text-center">
-                              <p className="text-[10px] font-black text-gray-800 uppercase tracking-widest mb-1">
-                                2. À l'arrivée (40% + Liv.)
-                              </p>
-                              <p className="text-xl font-bold text-gray-800">
-                                {formatAr(rest)} Ar
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                  <div className="text-center md:text-right w-full md:w-auto">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Total Net</p>
+                    <p className="text-3xl md:text-4xl font-black text-[#800020] tracking-tighter">
+                      {formatAr(commandeValidee.total)} Ar
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="mb-8 p-6 bg-red-50/50 rounded-xl border border-red-100">
-                <h3 className="font-black uppercase text-xs text-[#800020] mb-4 tracking-widest flex items-center gap-2">
-                  🚀 Que se passe-t-il maintenant ?
-                </h3>
-                <ul className="text-sm text-gray-700 space-y-4 font-medium">
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 bg-[#800020] text-white rounded-full flex items-center justify-center text-[10px]">
-                      1
-                    </span>
-                    <span>
-                      Notre équipe enregistre votre commande{" "}
-                      {commandeValidee.articles.length > 0 &&
-                      commandeValidee.articles[0].sur_commande
-                        ? "d'importation"
-                        : "en stock"}
-                      .
-                    </span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 bg-[#800020] text-white rounded-full flex items-center justify-center text-[10px]">
-                      2
-                    </span>
-                    <span>
-                      Vous recevrez un appel ou un message WhatsApp pour{" "}
-                      {commandeValidee.articles.length > 0 &&
-                      commandeValidee.articles[0].sur_commande
-                        ? "régler l'acompte."
-                        : "confirmer la livraison."}
-                    </span>
-                  </li>
-                </ul>
-              </div>
+              {/* Message Dynamique (Physique vs Digital) */}
+              {commandeValidee.articles.some(p => p.categorie_web === "Services" || p.sous_categorie_web === "Services") ? (
+                <div className="mb-10 p-6 bg-purple-50 rounded-2xl border border-purple-100 flex gap-4 items-start">
+                  <div className="text-2xl mt-1">💻</div>
+                  <div>
+                    <h3 className="font-black uppercase text-sm text-purple-900 mb-1 tracking-wider">Livraison Numérique</h3>
+                    <p className="text-sm font-bold text-purple-700 leading-relaxed">Votre service sera activé et envoyé sur le canal choisi sous 24h ouvrées après confirmation du paiement.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-10">
+                  <h3 className="font-black uppercase text-[10px] text-gray-400 tracking-widest mb-6 text-center">Prochaines étapes</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                      <div className="w-10 h-10 rounded-full bg-[#800020] text-white flex items-center justify-center font-black shrink-0">1</div>
+                      <div>
+                        <h4 className="font-bold text-gray-900 text-sm">Préparation</h4>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">Notre équipe prépare vos articles avec soin.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm opacity-70">
+                      <div className="w-10 h-10 rounded-full bg-gray-100 text-gray-400 border border-gray-200 flex items-center justify-center font-black shrink-0">2</div>
+                      <div>
+                        <h4 className="font-bold text-gray-900 text-sm">Confirmation</h4>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">Nous vous contacterons dans les plus brefs délais via WhatsApp.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-                <button
-                  onClick={() => setView(`suivi/${commandeValidee.numero}`)}
-                  className="w-full bg-[#800020] hover:bg-[#5a0016] text-white p-3.5 rounded-xl font-bold text-sm transition shadow-sm"
-                >
-                  📍 Suivre ma commande
-                </button>
-                <a
-                  href={`https://wa.me/261348697298?text=${encodeURIComponent(
-                    `Bonjour Hakimi Plus ! Je suis ${
-                      commandeValidee.nom
-                    }, je viens de valider la commande ${
-                      commandeValidee.numero
-                    } d'un montant de ${formatAr(commandeValidee.total)} Ar.`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white p-3.5 rounded-xl font-bold text-sm transition shadow-sm flex justify-center items-center gap-2"
-                >
-                  WhatsApp
-                </a>
+              {/* Boutons d'action modernes */}
+              <div className="flex flex-col gap-3">
+                {/* INFO SUIVI AJOUTÉE */}
+              <div className="mb-8 p-5 bg-blue-50/50 rounded-2xl border border-blue-100 flex items-start gap-4">
+                <div className="text-xl mt-0.5 animate-bounce">📍</div>
+                <div>
+                  <h3 className="font-black text-sm text-blue-900 mb-1 tracking-tight">Où est ma commande ?</h3>
+                  <p className="text-xs font-medium text-blue-800 leading-relaxed">
+                    Vous pouvez suivre l'avancée de votre livraison à tout moment. Il vous suffit de cliquer sur le lien de suivi ci-dessous et d'utiliser votre numéro de téléphone ainsi que votre code : <strong className="bg-white px-2 py-1 rounded shadow-sm border border-blue-200 select-all text-blue-900">{commandeValidee.numero}</strong>.
+                  </p>
+                </div>
+              </div>
+                <div className="flex flex-col md:flex-row gap-3">
+                  <button
+                    onClick={() => setView(`suivi/${commandeValidee.numero}`)}
+                    className="flex-1 bg-gray-900 hover:bg-black text-white px-6 py-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2"
+                  >
+                    Suivre la commande
+                  </button>
+                  <a
+                    href={`https://wa.me/261348697298?text=${encodeURIComponent(`Bonjour Hakimi Plus ! Je viens de valider la commande ${commandeValidee.numero}.`)}`}
+                    target="_blank" rel="noreferrer"
+                    className="flex-1 bg-[#25D366] hover:bg-[#20bd5a] text-white px-6 py-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2"
+                  >
+                    Contacter le support
+                  </a>
+                </div>
                 <button
                   onClick={telechargerRecuPDF}
-                  className="md:col-span-2 w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 p-3.5 rounded-xl font-bold text-sm transition shadow-sm"
+                  className="w-full bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 px-6 py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
                 >
-                  📄 Télécharger le reçu PDF
+                  <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                  Télécharger le Reçu Provisoire
                 </button>
               </div>
 
-              <div className="text-center pt-4 border-t border-gray-100">
+              <div className="text-center pt-8 mt-8 border-t border-gray-100">
                 <button
                   onClick={() => {
                     setView("accueil");
                     setCommandeValidee(null);
+                    sessionStorage.removeItem("hakimi_commande_validee");
                   }}
-                  className="text-xs font-bold text-gray-500 hover:text-[#800020] uppercase tracking-widest transition"
+                  className="text-xs font-black text-gray-400 hover:text-gray-900 uppercase tracking-widest transition-colors"
                 >
-                  ← Retourner à la boutique
+                  ← Revenir à la boutique
                 </button>
               </div>
             </div>
@@ -2654,7 +3194,7 @@ export default function App() {
               HAKIMI PLUS
             </h3>
             <p className="text-gray-400 text-sm leading-relaxed">
-              Votre boutique de confiance. Retrouvez vos produits préférés avec
+              Votre boutique en ligne. Retrouvez vos produits préférés avec
               un service de livraison rapide et un paiement sécurisé à la
               réception.
             </p>
@@ -2696,7 +3236,7 @@ export default function App() {
             </h3>
             <ul className="space-y-3 text-sm text-gray-400">
               <li className="flex items-center gap-2">
-                📍 Anosizato, Tananarive, Madagascar
+                📍 Anosizato Atsinanana, Tananarive, Madagascar
               </li>
               <li className="flex items-center gap-2">
                 📞 034 86 972 98 / 032 15 266 01
@@ -2719,6 +3259,52 @@ export default function App() {
           réservés.
         </div>
       </footer>
+      {/* --- 🍎 INSTRUCTIONS D'INSTALLATION POUR IPHONE --- */}
+      {showIOSPrompt && (
+        <div className="fixed inset-0 z-[300] flex items-end justify-center sm:items-center px-4 pb-12 sm:pb-0">
+          <div 
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in"
+            onClick={() => setShowIOSPrompt(false)}
+          ></div>
+          <div className="relative bg-white/90 backdrop-blur-xl w-full max-w-sm rounded-[2rem] p-6 shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-white">
+            <button 
+              onClick={() => setShowIOSPrompt(false)}
+              className="absolute top-4 right-4 w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-500 font-bold"
+            >
+              ×
+            </button>
+            <div className="text-center mb-6">
+              <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain mx-auto mb-3 drop-shadow-md rounded-xl" />
+              <h3 className="text-xl font-black text-gray-900 tracking-tight">Installer Hakimi Plus</h3>
+              <p className="text-sm text-gray-500 font-medium mt-1">Installez l'application sur votre iPhone pour un accès rapide.</p>
+            </div>
+            
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100 space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-500 text-xl border border-gray-100 shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                    <polyline points="16 6 12 2 8 6"></polyline>
+                    <line x1="12" y1="2" x2="12" y2="15"></line>
+                  </svg>
+                </div>
+                <p className="text-sm text-gray-700 font-bold">1. Appuyez sur le bouton <span className="text-blue-500">Partager</span> en bas de l'écran.</p>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-800 text-xl border border-gray-100 shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="12" y1="8" x2="12" y2="16"></line>
+                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                  </svg>
+                </div>
+                <p className="text-sm text-gray-700 font-bold">2. Choisissez <span className="text-gray-900">Sur l'écran d'accueil</span>.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showWhatsApp && (
         <div className="fixed bottom-6 right-6 z-[150] flex flex-col items-end gap-2">
