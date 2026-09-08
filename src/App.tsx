@@ -3255,8 +3255,8 @@ alert("📥 Préparation de votre document... Le téléchargement va démarrer d
           </div>
         </div>
         <div className="border-t border-gray-800 pt-6 text-center text-xs text-gray-500 font-bold">
-          &copy; {new Date().getFullYear()} Version 1.0-Hakimi Plus. Tous droits
-          réservés.
+          &copy; {new Date().getFullYear()} Version 1.1-Hakimi Plus. Tous droits
+          réservés. 2026
         </div>
       </footer>
       {/* --- 🍎 INSTRUCTIONS D'INSTALLATION POUR IPHONE --- */}
